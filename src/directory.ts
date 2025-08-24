@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import { VeracrossAuth } from './auth.js';
-import { SearchCache } from './cache.js';
+import { MongoSearchCache } from './mongodb-cache.js';
 
 export interface DirectorySearchParams {
   firstName?: string;
@@ -26,7 +26,7 @@ export interface DirectoryEntry {
 
 export class DirectorySearch {
   private auth: VeracrossAuth;
-  private cache?: SearchCache;
+  private cache?: MongoSearchCache;
   private currentUserEmail?: string;
 
   constructor(auth: VeracrossAuth) {
@@ -35,7 +35,7 @@ export class DirectorySearch {
 
   private ensureCache(userEmail: string): void {
     if (!this.cache || this.currentUserEmail !== userEmail) {
-      this.cache = new SearchCache(userEmail);
+      this.cache = new MongoSearchCache(userEmail);
       this.currentUserEmail = userEmail;
     }
   }
@@ -52,9 +52,9 @@ export class DirectorySearch {
 
       // Check cache first (unless refresh is requested)
       if (!params.refresh) {
-        const cachedResults = this.cache!.get(params);
+        const cachedResults = await this.cache!.get(params);
         if (cachedResults) {
-          const cacheInfo = this.cache!.getCacheInfo(params);
+          const cacheInfo = await this.cache!.getCacheInfo(params);
           // Use stderr for logging to avoid corrupting JSON-RPC on stdout
           console.error(`Directory search returned ${cachedResults.length} cached results for user ${params.userEmail} (age: ${cacheInfo.age}min, expires in: ${cacheInfo.expiresIn}min)`);
           return cachedResults;
@@ -82,7 +82,7 @@ export class DirectorySearch {
       const results = this.parseDirectoryResults(html);
       
       // Cache the results for 24 hours
-      this.cache!.set(params, results, 24);
+      await this.cache!.set(params, results, 24);
       // Use stderr for logging to avoid corrupting JSON-RPC on stdout
       console.error(`Directory search fetched ${results.length} fresh results for user ${params.userEmail} and cached for 24 hours`);
       

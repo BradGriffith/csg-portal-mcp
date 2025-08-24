@@ -11,6 +11,16 @@ import {
 
 import { VeracrossAuth } from './auth.js';
 import { DirectorySearch, DirectorySearchParams } from './directory.js';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Get the directory of the current module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load environment variables with absolute path
+dotenv.config({ path: join(__dirname, '../.env') });
 
 class CSGPortalMCPServer {
   private server: Server;
@@ -30,7 +40,7 @@ class CSGPortalMCPServer {
       }
     );
 
-    // Initialize with base URL - this should be configurable
+    // Initialize with base URL from environment or default
     const baseUrl = process.env.VERACROSS_BASE_URL || 'https://portals.veracross.com/csg';
     this.auth = new VeracrossAuth(baseUrl);
     this.directorySearch = new DirectorySearch(this.auth);
@@ -232,7 +242,7 @@ class CSGPortalMCPServer {
   }
 
   private async handleClearCredentials() {
-    this.auth.clearStoredCredentials();
+    await this.auth.clearStoredCredentials();
     
     return {
       content: [

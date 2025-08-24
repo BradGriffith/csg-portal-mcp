@@ -1,10 +1,10 @@
 import fetch from 'node-fetch';
 import { CookieJar } from 'tough-cookie';
-import { CredentialStore, Credentials } from './credentials.js';
+import { MongoCredentialStore, Credentials } from './mongodb-credentials.js';
 
 export class VeracrossAuth {
   private cookieJar: CookieJar;
-  private credentialStore?: CredentialStore;
+  private credentialStore?: MongoCredentialStore;
   private baseUrl: string;
   private isAuthenticated: boolean = false;
   private currentUserEmail?: string;
@@ -17,7 +17,7 @@ export class VeracrossAuth {
 
   private ensureCredentialStore(userEmail: string): void {
     if (!this.credentialStore || this.currentUserEmail !== userEmail) {
-      this.credentialStore = new CredentialStore(userEmail);
+      this.credentialStore = new MongoCredentialStore(userEmail);
       this.currentUserEmail = userEmail;
       // Reset authentication state when switching users
       this.isAuthenticated = false;
@@ -167,10 +167,16 @@ export class VeracrossAuth {
     this.cookieJar = new CookieJar(); // Clear cookies
   }
 
-  public clearStoredCredentials(): void {
+  public async clearStoredCredentials(): Promise<void> {
     if (this.credentialStore) {
-      this.credentialStore.clearCredentials();
+      await this.credentialStore.clearCredentials();
     }
     this.logout();
+  }
+
+  public async close(): Promise<void> {
+    if (this.credentialStore) {
+      await this.credentialStore.close();
+    }
   }
 }
