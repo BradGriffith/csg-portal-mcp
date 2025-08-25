@@ -1,6 +1,6 @@
 {
   "name": "@bradgriffith/csg-portal-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP Server for Columbus School for Girls Veracross portal - directory search, calendar events, and secure browser authentication",
   "type": "module",
   "main": "dist/index.js",
