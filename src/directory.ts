@@ -145,21 +145,41 @@ export class DirectorySearch {
       };
       entries.push(studentEntry);
       
-      // Parse parent/guardian entries
+      // Parse parent/guardian entries - updated for new HTML structure
       $entry.find('.directory-Entry_FieldTitle--blue').each((_, parentElement) => {
         const $parent = $(parentElement);
         const parentName = $parent.text().trim();
         
         if (!parentName) return;
         
-        // Find parent's contact info in the same grid section
-        const $parentSection = $parent.closest('.ae-grid__item');
+        // Find parent's contact info - they are in the same grid container as the parent name
+        const $parentContainer = $parent.closest('.ae-grid');
         
-        const phoneLink = $parentSection.find('a[href^="tel:"]').first();
-        const phone = phoneLink.length ? phoneLink.text().trim() : undefined;
+        // Look for mobile phone number
+        let phone: string | undefined;
+        $parentContainer.find('.directory-Entry_FieldLabel').each((_, labelEl) => {
+          const $label = $(labelEl);
+          if ($label.text().trim() === 'Mobile') {
+            const $valueCell = $label.parent().next('.ae-grid__item--no-padding');
+            const phoneLink = $valueCell.find('a[href^="tel:"]');
+            if (phoneLink.length) {
+              phone = phoneLink.text().trim();
+            }
+          }
+        });
         
-        const emailLink = $parentSection.find('a[href^="mailto:"]').first();
-        const email = emailLink.length ? emailLink.text().trim() : undefined;
+        // Look for email address
+        let email: string | undefined;
+        $parentContainer.find('.directory-Entry_FieldLabel').each((_, labelEl) => {
+          const $label = $(labelEl);
+          if ($label.text().trim() === 'Email') {
+            const $valueCell = $label.parent().next('.ae-grid__item--no-padding');
+            const emailLink = $valueCell.find('a[href^="mailto:"]');
+            if (emailLink.length) {
+              email = emailLink.text().trim();
+            }
+          }
+        });
         
         const parentEntry: DirectoryEntry = {
           name: parentName,
