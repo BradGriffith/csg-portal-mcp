@@ -11,6 +11,7 @@ import {
 
 import { VeracrossAuth } from './auth.js';
 import { DirectorySearch, DirectorySearchParams } from './directory.js';
+import { CalendarSearch, CalendarSearchParams } from './calendar.js';
 import { UserManager } from './user-manager.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -27,6 +28,7 @@ class CSGPortalMCPServer {
   private server: Server;
   private auth: VeracrossAuth;
   private directorySearch: DirectorySearch;
+  private calendarSearch: CalendarSearch;
   private userManager: UserManager;
 
   constructor() {
@@ -46,6 +48,7 @@ class CSGPortalMCPServer {
     const baseUrl = process.env.VERACROSS_BASE_URL || 'https://portals.veracross.com/csg';
     this.auth = new VeracrossAuth(baseUrl);
     this.directorySearch = new DirectorySearch(this.auth);
+    this.calendarSearch = new CalendarSearch(this.auth);
     this.userManager = new UserManager();
 
     this.setupToolHandlers();
@@ -144,6 +147,28 @@ class CSGPortalMCPServer {
             },
           },
           {
+            name: 'upcoming_events',
+            description: 'Search for upcoming school calendar events. By default searches the next 3 months, automatically extends to 12 months if no events found.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                searchMonths: {
+                  type: 'number',
+                  description: 'Number of months to search ahead (default: 3, fallback: 12)',
+                },
+                refresh: {
+                  type: 'boolean',
+                  description: 'Set to true to bypass cache and fetch fresh results',
+                },
+                userEmail: {
+                  type: 'string',
+                  description: 'User email address for authentication (optional if you have a default user set)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
             name: 'logout',
             description: 'Logout from Veracross portal and clear session',
             inputSchema: {
@@ -182,6 +207,9 @@ class CSGPortalMCPServer {
 
           case 'directory_search':
             return await this.handleDirectorySearch(args as DirectorySearchParams);
+
+          case 'upcoming_events':
+            return await this.handleUpcomingEvents(args as CalendarSearchParams);
 
           case 'logout':
             return await this.handleLogout();
@@ -400,6 +428,72 @@ class CSGPortalMCPServer {
       throw new McpError(
         ErrorCode.InternalError,
         `Directory search failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async handleUpcomingEvents(args: CalendarSearchParams) {
+    try {
+      // Resolve user email if not provided
+      const { email } = await this.resolveUserEmail(args.userEmail);
+      
+      // Create search params with resolved email
+      const searchParams: CalendarSearchParams = {
+        ...args,
+        userEmail: email
+      };
+      
+      const events = await this.calendarSearch.searchUpcomingEvents(searchParams);
+      
+      if (events.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No upcoming events found in the school calendar.',
+            },
+          ],
+        };
+      }
+      
+      const eventsText = events.map(event => {
+        const parts = [`Title: ${event.title}`];
+        
+        // Format date/time
+        const startDate = new Date(event.startDate);
+        const dateStr = startDate.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        parts.push(`Date: ${dateStr}`);
+        
+        if (!event.allDay && event.startTime) {
+          parts.push(`Time: ${event.startTime}${event.endTime ? ` - ${event.endTime}` : ''}`);
+        } else if (event.allDay) {
+          parts.push(`All Day Event`);
+        }
+        
+        if (event.location) parts.push(`Location: ${event.location}`);
+        if (event.description) parts.push(`Description: ${event.description}`);
+        if (event.category) parts.push(`Category: ${event.category}`);
+        
+        return parts.join('\n');
+      }).join('\n\n---\n\n');
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${events.length} upcoming events:\n\n${eventsText}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Calendar search failed: ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }
