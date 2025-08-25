@@ -11,6 +11,7 @@ import {
 
 import { VeracrossAuth } from './auth.js';
 import { DirectorySearch, DirectorySearchParams } from './directory.js';
+import { UserManager } from './user-manager.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -26,6 +27,7 @@ class CSGPortalMCPServer {
   private server: Server;
   private auth: VeracrossAuth;
   private directorySearch: DirectorySearch;
+  private userManager: UserManager;
 
   constructor() {
     this.server = new Server(
@@ -44,6 +46,7 @@ class CSGPortalMCPServer {
     const baseUrl = process.env.VERACROSS_BASE_URL || 'https://portals.veracross.com/csg';
     this.auth = new VeracrossAuth(baseUrl);
     this.directorySearch = new DirectorySearch(this.auth);
+    this.userManager = new UserManager();
 
     this.setupToolHandlers();
   }
@@ -53,25 +56,53 @@ class CSGPortalMCPServer {
       return {
         tools: [
           {
-            name: 'login',
-            description: 'Login to Veracross portal with username and password. Each user\'s credentials are stored separately.',
+            name: 'authenticate_browser',
+            description: 'Open browser for secure Veracross authentication. Your credentials never appear in Claude - you log in normally via your browser.',
             inputSchema: {
               type: 'object',
               properties: {
-                username: {
-                  type: 'string',
-                  description: 'Veracross username (usually an email address)',
-                },
-                password: {
-                  type: 'string',
-                  description: 'Veracross password',
-                },
                 userEmail: {
                   type: 'string',
-                  description: 'User email address for credential isolation (if different from username)',
+                  description: 'Your email address for session isolation and identification (optional if you have a default user set)',
                 },
               },
-              required: ['username', 'password'],
+              required: [],
+            },
+          },
+          {
+            name: 'set_default_user',
+            description: 'Set a default user email so you don\'t need to provide it every time. This email will be used for all authentication and directory searches.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                userEmail: {
+                  type: 'string',
+                  description: 'Your email address to set as the default user',
+                },
+              },
+              required: ['userEmail'],
+            },
+          },
+          {
+            name: 'list_users',
+            description: 'List all users that have been configured, showing which is the default.',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+            },
+          },
+          {
+            name: 'check_authentication',
+            description: 'Check if you have a valid stored authentication session.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                userEmail: {
+                  type: 'string',
+                  description: 'Your email address to check authentication status for (optional if you have a default user set)',
+                },
+              },
+              required: [],
             },
           },
           {
@@ -106,10 +137,10 @@ class CSGPortalMCPServer {
                 },
                 userEmail: {
                   type: 'string',
-                  description: 'User email address for authentication and data isolation',
+                  description: 'User email address for authentication and data isolation (optional if you have a default user set)',
                 },
               },
-              required: ['userEmail'],
+              required: [],
             },
           },
           {
@@ -137,8 +168,17 @@ class CSGPortalMCPServer {
         const { name, arguments: args } = request.params;
 
         switch (name) {
-          case 'login':
-            return await this.handleLogin(args as { username: string; password: string });
+          case 'authenticate_browser':
+            return await this.handleBrowserAuthentication(args as { userEmail?: string });
+
+          case 'set_default_user':
+            return await this.handleSetDefaultUser(args as { userEmail: string });
+
+          case 'list_users':
+            return await this.handleListUsers();
+
+          case 'check_authentication':
+            return await this.handleCheckAuthentication(args as { userEmail?: string });
 
           case 'directory_search':
             return await this.handleDirectorySearch(args as DirectorySearchParams);
@@ -168,25 +208,161 @@ class CSGPortalMCPServer {
     });
   }
 
-  private async handleLogin(args: { username: string; password: string; userEmail?: string }) {
-    const success = await this.auth.login(args.username, args.password, args.userEmail);
-    const userIdentifier = args.userEmail || args.username;
+  private async resolveUserEmail(providedEmail?: string): Promise<{ email: string; isAutoDetected: boolean }> {
+    if (providedEmail) {
+      // Update last used timestamp for this user
+      await this.userManager.updateLastUsed(providedEmail);
+      return { email: providedEmail, isAutoDetected: false };
+    }
     
-    return {
-      content: [
-        {
-          type: 'text',
-          text: success 
-            ? `Successfully logged in to Veracross portal for user ${userIdentifier}. Credentials have been securely stored in user-specific storage.`
-            : 'Login failed. Please check your username and password.',
-        },
-      ],
-    };
+    // Try to auto-detect user email
+    const detectedEmail = await this.userManager.detectUserEmail();
+    if (detectedEmail) {
+      return { email: detectedEmail, isAutoDetected: true };
+    }
+    
+    throw new Error('No user email provided and no default user configured. Please use set_default_user first or provide userEmail parameter.');
+  }
+
+  private async handleSetDefaultUser(args: { userEmail: string }) {
+    try {
+      await this.userManager.setDefaultUser(args.userEmail);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully set ${args.userEmail} as the default user. You can now use authentication and directory search tools without specifying an email.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to set default user: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleListUsers() {
+    try {
+      const users = await this.userManager.getAllUsers();
+      
+      if (users.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'No users configured yet. Use set_default_user to add your first user.',
+            },
+          ],
+        };
+      }
+      
+      const userList = users.map(user => {
+        const defaultIndicator = user.isDefault ? ' (DEFAULT)' : '';
+        const lastUsed = user.lastUsed.toLocaleDateString();
+        return `• ${user.email}${defaultIndicator} - Last used: ${lastUsed}`;
+      }).join('\n');
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Configured users:\n\n${userList}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to list users: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleBrowserAuthentication(args: { userEmail?: string }) {
+    try {
+      const { email, isAutoDetected } = await this.resolveUserEmail(args.userEmail);
+      
+      // Add user to manager when they authenticate (if not already there)
+      await this.userManager.addUser(email, !await this.userManager.hasUsers());
+      
+      const success = await this.auth.authenticateWithBrowser(email);
+      
+      const autoDetectedMsg = isAutoDetected ? ` (auto-detected from default user)` : '';
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: success 
+              ? `🎉 Successfully authenticated via browser for user ${email}${autoDetectedMsg}! Your Veracross session has been securely stored and you can now use directory search.`
+              : '❌ Browser authentication failed or was cancelled. Please try again and make sure to complete the login process in your browser.',
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Browser authentication error: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  }
+
+  private async handleCheckAuthentication(args: { userEmail?: string }) {
+    try {
+      const { email, isAutoDetected } = await this.resolveUserEmail(args.userEmail);
+      const hasStoredSession = await this.auth.hasStoredSession(email);
+      
+      const autoDetectedMsg = isAutoDetected ? ` (auto-detected from default user)` : '';
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: hasStoredSession
+              ? `✅ You have a valid stored authentication session for ${email}${autoDetectedMsg}. You can use directory search without re-authenticating.`
+              : `❌ No stored authentication session found for ${email}${autoDetectedMsg}. Please use the authenticate_browser tool first.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Error checking authentication: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
   }
 
   private async handleDirectorySearch(args: DirectorySearchParams) {
     try {
-      const results = await this.directorySearch.search(args);
+      // Resolve user email if not provided
+      const { email } = await this.resolveUserEmail(args.userEmail);
+      
+      // Create search params with resolved email
+      const searchParams: DirectorySearchParams = {
+        ...args,
+        userEmail: email
+      };
+      
+      const results = await this.directorySearch.search(searchParams);
       
       if (results.length === 0) {
         return {

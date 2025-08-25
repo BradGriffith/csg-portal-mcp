@@ -1,23 +1,22 @@
 import fetch from 'node-fetch';
 import { CookieJar } from 'tough-cookie';
-import { MongoCredentialStore, Credentials } from './mongodb-credentials.js';
+import { BrowserAuthServer } from './browser-auth.js';
 
 export class VeracrossAuth {
   private cookieJar: CookieJar;
-  private credentialStore?: MongoCredentialStore;
   private baseUrl: string;
   private isAuthenticated: boolean = false;
   private currentUserEmail?: string;
+  private browserAuthServer?: BrowserAuthServer;
 
   constructor(baseUrl: string) {
     this.cookieJar = new CookieJar();
     this.baseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
-    // Note: credentialStore will be initialized when user email is provided
   }
 
-  private ensureCredentialStore(userEmail: string): void {
-    if (!this.credentialStore || this.currentUserEmail !== userEmail) {
-      this.credentialStore = new MongoCredentialStore(userEmail);
+  private ensureBrowserAuthServer(userEmail: string): void {
+    if (!this.browserAuthServer || this.currentUserEmail !== userEmail) {
+      this.browserAuthServer = new BrowserAuthServer(userEmail);
       this.currentUserEmail = userEmail;
       // Reset authentication state when switching users
       this.isAuthenticated = false;
@@ -47,118 +46,85 @@ export class VeracrossAuth {
     return response;
   }
 
-  public async login(username?: string, password?: string, userEmail?: string): Promise<boolean> {
+  /**
+   * Start browser-based authentication flow
+   */
+  public async authenticateWithBrowser(userEmail: string): Promise<boolean> {
     try {
-      // Determine user email - either provided or extracted from username
-      let email: string;
-      if (userEmail) {
-        email = userEmail;
-      } else if (username && username.includes('@')) {
-        email = username;
-      } else {
-        throw new Error('User email is required for authentication');
-      }
-
-      // Ensure credential store is set up for this user
-      this.ensureCredentialStore(email);
-
-      // Use provided credentials or load from store
-      let credentials: Credentials | null = null;
+      this.ensureBrowserAuthServer(userEmail);
       
-      if (username && password) {
-        credentials = { username, password };
-        await this.credentialStore!.saveCredentials(credentials);
-      } else {
-        credentials = await this.credentialStore!.loadCredentials();
-      }
-
-      if (!credentials) {
-        throw new Error('No credentials available');
-      }
-
-      // Get login page to extract any CSRF tokens or form data
-      const loginPageUrl = `${this.baseUrl}/login`;
-      const loginPageResponse = await this.makeRequest(loginPageUrl);
-      const loginPageHtml = await loginPageResponse.text();
-
-      // Extract any hidden form fields (CSRF tokens, etc.)
-      const hiddenFields = this.extractHiddenFields(loginPageHtml);
-
-      // Perform login
-      const loginData = new URLSearchParams({
-        username: credentials.username,
-        password: credentials.password,
-        ...hiddenFields,
-      });
-
-      const loginResponse = await this.makeRequest(loginPageUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': loginPageUrl,
-        },
-        body: loginData.toString(),
-        redirect: 'manual', // Handle redirects manually to check for success
-      });
-
-      // Check if login was successful
-      // Typically, successful login redirects to dashboard or returns 302
-      if (loginResponse.status === 302 || loginResponse.status === 200) {
-        const location = loginResponse.headers.get('location');
-        if (location && !location.includes('login')) {
-          this.isAuthenticated = true;
-          return true;
-        }
-      }
-
-      // Check response for login error indicators
-      const responseText = await loginResponse.text();
-      if (!responseText.includes('Invalid') && !responseText.includes('error')) {
+      // Start the browser authentication flow
+      const success = await this.browserAuthServer!.startAuthFlow();
+      
+      if (success) {
+        // Load the stored session into our cookie jar
+        await this.loadStoredSession(userEmail);
         this.isAuthenticated = true;
         return true;
       }
-
+      
       return false;
     } catch (error) {
-      // Use stderr for logging to avoid corrupting JSON-RPC on stdout
-      console.error('Login failed:', error);
+      console.error('Browser authentication failed:', error);
       return false;
     }
   }
 
-  private extractHiddenFields(html: string): Record<string, string> {
-    const hiddenFields: Record<string, string> = {};
-    const regex = /<input[^>]*type=["\']hidden["\'][^>]*>/gi;
-    const matches = html.match(regex) || [];
-
-    for (const match of matches) {
-      const nameMatch = match.match(/name=["\']([^"\']*)["\']/i);
-      const valueMatch = match.match(/value=["\']([^"\']*)["\']/i);
+  /**
+   * Load a stored browser session for the user
+   */
+  private async loadStoredSession(userEmail: string): Promise<boolean> {
+    try {
+      this.ensureBrowserAuthServer(userEmail);
       
-      if (nameMatch && valueMatch) {
-        hiddenFields[nameMatch[1]] = valueMatch[1];
+      const cookieJar = await this.browserAuthServer!.createCookieJar();
+      if (cookieJar) {
+        this.cookieJar = cookieJar;
+        this.isAuthenticated = true;
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Failed to load stored session:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Ensure user is authenticated, attempting to use stored session first
+   */
+  public async ensureAuthenticated(userEmail: string): Promise<boolean> {
+    // If we're already authenticated for this user, we're good
+    if (this.isAuthenticated && this.currentUserEmail === userEmail) {
+      return true;
+    }
+
+    // Try to load stored session first
+    const sessionLoaded = await this.loadStoredSession(userEmail);
+    if (sessionLoaded) {
+      // Test the session by making a simple request
+      try {
+        const testResponse = await this.makeRequest(`${this.baseUrl}/parent`);
+        if (testResponse.ok && !testResponse.url.includes('login')) {
+          return true;
+        }
+      } catch (error) {
+        // Session might be invalid, continue to browser auth
       }
     }
 
-    return hiddenFields;
-  }
-
-  public async ensureAuthenticated(userEmail?: string): Promise<boolean> {
-    // If no user is set and no email provided, we can't authenticate
-    if (!this.currentUserEmail && !userEmail) {
-      throw new Error('User email required for authentication');
-    }
-
-    // If switching users or not authenticated, try to authenticate
-    if (!this.isAuthenticated || (userEmail && userEmail !== this.currentUserEmail)) {
-      return await this.login(undefined, undefined, userEmail);
-    }
-
-    return true;
+    // If no stored session or it's invalid, user needs to authenticate via browser
+    throw new Error('Browser authentication required. Please use the authenticate_browser tool first.');
   }
 
   public async makeAuthenticatedRequest(url: string, options: any = {}) {
-    await this.ensureAuthenticated();
+    // Ensure we have a valid session (but don't start browser flow here)
+    if (!this.currentUserEmail) {
+      throw new Error('No user email set. Please authenticate first.');
+    }
+    
+    await this.ensureAuthenticated(this.currentUserEmail);
     return this.makeRequest(url, options);
   }
 
@@ -168,15 +134,30 @@ export class VeracrossAuth {
   }
 
   public async clearStoredCredentials(): Promise<void> {
-    if (this.credentialStore) {
-      await this.credentialStore.clearCredentials();
+    if (this.browserAuthServer) {
+      // Clear the stored session data
+      const credStore = new (await import('./mongodb-credentials.js')).MongoCredentialStore(this.currentUserEmail!);
+      await credStore.clearCredentials();
     }
     this.logout();
   }
 
   public async close(): Promise<void> {
-    if (this.credentialStore) {
-      await this.credentialStore.close();
+    if (this.browserAuthServer) {
+      this.browserAuthServer.close();
+    }
+  }
+
+  /**
+   * Check if user has a stored session
+   */
+  public async hasStoredSession(userEmail: string): Promise<boolean> {
+    try {
+      this.ensureBrowserAuthServer(userEmail);
+      const sessionData = await this.browserAuthServer!.getStoredSession();
+      return sessionData !== null;
+    } catch (error) {
+      return false;
     }
   }
 }
