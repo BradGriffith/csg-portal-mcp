@@ -43,9 +43,7 @@ export class CalendarSearch {
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     const year = date.getFullYear();
-    const formatted = `${month}%2F${day}%2F${year}`; // URL-encoded MM/DD/YYYY
-    console.error(`Formatted date: ${date.toISOString()} -> ${formatted}`);
-    return formatted;
+    return `${month}%2F${day}%2F${year}`; // URL-encoded MM/DD/YYYY
   }
 
   private buildCalendarUrl(beginDate: Date, endDate: Date): string {
@@ -97,7 +95,6 @@ export class CalendarSearch {
 
       // Make authenticated request to calendar API
       const calendarUrl = this.buildCalendarUrl(beginDate, endDate);
-      console.error(`Calendar API URL: ${calendarUrl}`);
       const response = await this.auth.makeAuthenticatedRequest(calendarUrl);
       
       if (!response.ok) {
@@ -105,7 +102,6 @@ export class CalendarSearch {
       }
 
       const jsonData = await response.json() as any;
-      console.error(`Calendar API response:`, JSON.stringify(jsonData).substring(0, 500));
       
       // Parse the JSON response
       let events = this.parseCalendarEvents(jsonData);

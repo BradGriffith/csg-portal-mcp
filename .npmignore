@@ -1,0 +1,38 @@
+# Source files
+src/
+tsconfig.json
+.env*
+!.env.example
+
+# Development files
+node_modules/
+*.log
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Testing
+test/
+coverage/
+
+# Documentation (except README.md)
+docs/
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Build artifacts that shouldn't be published
+dist/**/*.map
+dist/**/*.tsbuildinfo

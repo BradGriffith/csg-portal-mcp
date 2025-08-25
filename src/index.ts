@@ -87,14 +87,6 @@ class CSGPortalMCPServer {
             },
           },
           {
-            name: 'list_users',
-            description: 'List all users that have been configured, showing which is the default.',
-            inputSchema: {
-              type: 'object',
-              properties: {},
-            },
-          },
-          {
             name: 'check_authentication',
             description: 'Check if you have a valid stored authentication session.',
             inputSchema: {
@@ -198,9 +190,6 @@ class CSGPortalMCPServer {
 
           case 'set_default_user':
             return await this.handleSetDefaultUser(args as { userEmail: string });
-
-          case 'list_users':
-            return await this.handleListUsers();
 
           case 'check_authentication':
             return await this.handleCheckAuthentication(args as { userEmail?: string });

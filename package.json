@@ -1,13 +1,37 @@
 {
-  "name": "csg-portal-mcp",
+  "name": "@bradgriffith/csg-portal-mcp",
   "version": "1.0.0",
-  "description": "MCP Server for Columbus School for Girls Veracross portal",
+  "description": "MCP Server for Columbus School for Girls Veracross portal - directory search, calendar events, and secure browser authentication",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "csg-portal-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "veracross",
+    "school-portal",
+    "directory",
+    "calendar",
+    "claude-desktop"
+  ],
+  "author": "Brad Griffith <brad@bradgriffith.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bradgriffith/csg-portal-mcp.git"
+  },
+  "homepage": "https://github.com/bradgriffith/csg-portal-mcp#readme",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
