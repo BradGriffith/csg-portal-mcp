@@ -12,6 +12,7 @@ import {
 import { VeracrossAuth } from './auth.js';
 import { DirectorySearch, DirectorySearchParams } from './directory.js';
 import { CalendarSearch, CalendarSearchParams } from './calendar.js';
+import { LunchVolunteerSearch, LunchVolunteerParams } from './lunch-volunteers.js';
 import { UserManager } from './user-manager.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -29,6 +30,7 @@ class CSGPortalMCPServer {
   private auth: VeracrossAuth;
   private directorySearch: DirectorySearch;
   private calendarSearch: CalendarSearch;
+  private lunchVolunteerSearch: LunchVolunteerSearch;
   private userManager: UserManager;
 
   constructor() {
@@ -49,6 +51,7 @@ class CSGPortalMCPServer {
     this.auth = new VeracrossAuth(baseUrl);
     this.directorySearch = new DirectorySearch(this.auth);
     this.calendarSearch = new CalendarSearch(this.auth);
+    this.lunchVolunteerSearch = new LunchVolunteerSearch();
     this.userManager = new UserManager();
 
     this.setupToolHandlers();
@@ -59,8 +62,8 @@ class CSGPortalMCPServer {
       return {
         tools: [
           {
-            name: 'authenticate_browser',
-            description: 'Open browser for secure Veracross authentication. Your credentials never appear in Claude - you log in normally via your browser.',
+            name: 'login',
+            description: 'Log in to the CSG Veracross portal. Opens your browser for secure authentication - your credentials never appear in Claude.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -101,7 +104,7 @@ class CSGPortalMCPServer {
             },
           },
           {
-            name: 'directory_search',
+            name: 'search_directory',
             description: 'Search the CSG directory for students, parents, and staff. Results are cached for 24 hours by default. CSG uses Forms (not grades) with 4 schools: PYC (ages 3/4, 4/5), Lower School (Forms I-V), Middle School (Forms VI-VIII), Upper School (Forms IX-XII).',
             inputSchema: {
               type: 'object',
@@ -139,8 +142,8 @@ class CSGPortalMCPServer {
             },
           },
           {
-            name: 'upcoming_events',
-            description: 'Search for upcoming school calendar events. By default searches the next 3 months, automatically extends to 12 months if no events found.',
+            name: 'school_events',
+            description: 'Check upcoming school calendar events. By default searches the next 3 months, automatically extends to 12 months if no events found.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -155,6 +158,28 @@ class CSGPortalMCPServer {
                 userEmail: {
                   type: 'string',
                   description: 'User email address for authentication (optional if you have a default user set)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'lunch_volunteers',
+            description: 'Check Lower School lunch volunteer opportunities. Shows only days that need volunteers (open slots) for Salad/deli and Soup positions at 10:45am-11:45am in the dining hall.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                refresh: {
+                  type: 'boolean',
+                  description: 'Get the latest volunteer data (bypasses cache)',
+                },
+                date: {
+                  type: 'string',
+                  description: 'Check a specific date in YYYY-MM-DD format (e.g., "2025-08-27")',
+                },
+                week: {
+                  type: 'string',
+                  description: 'Check a week: "this" (current Sunday-Saturday), "next" (next Sunday-Saturday), or specific date to find week containing that date',
                 },
               },
               required: [],
@@ -185,7 +210,8 @@ class CSGPortalMCPServer {
         const { name, arguments: args } = request.params;
 
         switch (name) {
-          case 'authenticate_browser':
+          case 'login':
+          case 'authenticate_browser': // Backward compatibility
             return await this.handleBrowserAuthentication(args as { userEmail?: string });
 
           case 'set_default_user':
@@ -194,11 +220,17 @@ class CSGPortalMCPServer {
           case 'check_authentication':
             return await this.handleCheckAuthentication(args as { userEmail?: string });
 
-          case 'directory_search':
+          case 'search_directory':
+          case 'directory_search': // Backward compatibility
             return await this.handleDirectorySearch(args as DirectorySearchParams);
 
-          case 'upcoming_events':
+          case 'school_events':
+          case 'upcoming_events': // Backward compatibility
             return await this.handleUpcomingEvents(args as CalendarSearchParams);
+
+          case 'lunch_volunteers':
+          case 'ls_lunch_volunteer': // Backward compatibility
+            return await this.handleLunchVolunteers(args as LunchVolunteerParams);
 
           case 'logout':
             return await this.handleLogout();
@@ -352,7 +384,7 @@ class CSGPortalMCPServer {
             type: 'text',
             text: hasStoredSession
               ? `✅ You have a valid stored authentication session for ${email}${autoDetectedMsg}. You can use directory search without re-authenticating.`
-              : `❌ No stored authentication session found for ${email}${autoDetectedMsg}. Please use the authenticate_browser tool first.`,
+              : `❌ No stored authentication session found for ${email}${autoDetectedMsg}. Please use the login tool first.`,
           },
         ],
       };
@@ -484,6 +516,91 @@ class CSGPortalMCPServer {
         ErrorCode.InternalError,
         `Calendar search failed: ${error instanceof Error ? error.message : String(error)}`
       );
+    }
+  }
+
+  private async handleLunchVolunteers(args: LunchVolunteerParams) {
+    try {
+      const slots = await this.lunchVolunteerSearch.searchVolunteerSlots(args);
+      
+      if (slots.length === 0) {
+        let noResultsMessage = 'No lunch volunteer slots found';
+        
+        if (args.date) {
+          noResultsMessage += ` for ${this.formatSlotDate(args.date)}`;
+        } else if (args.week === 'this') {
+          noResultsMessage += ' for this week (Sunday through Saturday)';
+        } else if (args.week === 'next') {
+          noResultsMessage += ' for next week (Sunday through Saturday)';
+        } else if (args.week) {
+          noResultsMessage += ` for the week containing ${args.week}`;
+        } else {
+          noResultsMessage += '. This could mean either:\n\n• No volunteer slots are currently posted\n• The SignUpGenius page structure has changed\n• The signup period has ended\n\nTry checking the SignUpGenius page directly or contact the school for current volunteer opportunities.';
+        }
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: noResultsMessage + '.',
+            },
+          ],
+        };
+      }
+      
+      const slotsText = slots.map(slot => {
+        const parts = [`**${slot.dayOfWeek}, ${this.formatSlotDate(slot.date)}**`];
+        parts.push(`Time: ${slot.time}`);
+        parts.push(`Location: ${slot.location}`);
+        parts.push('');
+        
+        slot.slots.forEach(position => {
+          const statusEmoji = position.status === 'full' ? '🔴' : '🟢';
+          const availabilityText = position.status === 'full' 
+            ? `All ${position.slotsTotal} slots filled` 
+            : `${position.slotsAvailable} of ${position.slotsTotal} slots available`;
+            
+          parts.push(`${statusEmoji} **${position.position}**: ${availabilityText}`);
+          
+          if (position.volunteers.length > 0) {
+            parts.push(`   Volunteers: ${position.volunteers.join(', ')}`);
+          }
+        });
+        
+        return parts.join('\n');
+      }).join('\n\n---\n\n');
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Lower School Lunch Volunteer Slots:\n\n${slotsText}`,
+          },
+        ],
+      };
+    } catch (error) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Lunch volunteer search failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private formatSlotDate(dateString: string): string {
+    try {
+      // Parse YYYY-MM-DD format with explicit components to avoid timezone issues
+      const [year, month, day] = dateString.split('-').map(Number);
+      if (!year || !month || !day) return dateString;
+      
+      // Create date with explicit components (month is 0-based)
+      const date = new Date(year, month - 1, day);
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } catch (error) {
+      return dateString;
     }
   }
 

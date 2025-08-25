@@ -24,7 +24,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bradgriffith/csg-portal-mcp.git"
+    "url": "git+https://github.com/bradgriffith/csg-portal-mcp.git"
   },
   "homepage": "https://github.com/bradgriffith/csg-portal-mcp#readme",
   "scripts": {

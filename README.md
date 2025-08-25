@@ -11,6 +11,7 @@ A Model Context Protocol (MCP) server that provides secure access to directory s
 - 🔐 **Secure Browser Authentication** - No credentials stored in Claude, login via your browser
 - 📞 **Directory Search** - Find students, parents, and staff with contact information
 - 📅 **Calendar Events** - Search upcoming school events and activities
+- 🍽️ **Lower School Lunch Volunteers** - Check volunteer slots and availability
 - 👥 **Multi-User Support** - Isolated data storage per user
 - ⚡ **Smart Caching** - 24-hour cache for improved performance
 - 🏫 **CSG-Specific** - Tailored for Columbus School for Girls grade system (Forms I-XII)
@@ -74,9 +75,9 @@ If you don't have access to the CSG Veracross portal, this server will not work 
 After installing the MCP server, you can start using it immediately! Just send prompts to Claude and include your email address.
 
 1. **Authentication** (one-time setup):
-   Simply ask Claude to authenticate you:
+   Simply ask Claude to log you in:
    ```
-   "Please authenticate me with the CSG portal using my email: parent@example.com"
+   "Please log me in to the CSG portal using my email: parent@example.com"
    ```
    - A web browser window will automatically open with a secure login form
    - Enter your regular CSG Veracross username and password
@@ -116,6 +117,19 @@ Once authenticated, try these example prompts:
 "What's on the school calendar for the next 3 months?"
 ```
 
+**Lower School Lunch Volunteers:**
+```
+"Check the Lower School lunch volunteer slots for this week"
+
+"Are there any open lunch volunteer positions for next week?"
+
+"Show me lunch volunteer slots for August 27, 2025"
+
+"Are there any available volunteer spots on Wednesday?"
+
+"Show me days this week that need lunch volunteers"
+```
+
 **User Management:**
 ```
 "Check if I'm still authenticated with the CSG portal"
@@ -141,6 +155,9 @@ ENCRYPTION_MASTER_KEY=your-secure-encryption-key-here
 
 # Veracross portal URL (optional, defaults to CSG)
 VERACROSS_BASE_URL=https://portals.veracross.com/csg
+
+# SignUpGenius URLs (optional, defaults to current CSG URLs)
+LS_LUNCH_SIGNUP_URL=https://www.signupgenius.com/go/10C084BADAA2BA2FFC43-57722061-lslunch#/
 ```
 
 ### MongoDB Setup
@@ -152,19 +169,29 @@ The server requires MongoDB for secure credential and cache storage:
 
 ### Available Tools
 
-#### `authenticate_browser`
-Secure browser-based login to Veracross portal. No credentials are stored in Claude.
+#### `login`
+Log in to the CSG Veracross portal via secure browser authentication. No credentials are stored in Claude.
 
-#### `directory_search`
+#### `search_directory`
 Search the school directory for students, parents, and staff.
 - **Parameters**: `firstName`, `lastName`, `city`, `postalCode`, `gradeLevel`
 - **Grade Levels**: Use CSG format like "VI", "X", "3/4 Yr Olds", etc.
 
-#### `upcoming_events`
-Search for upcoming school calendar events.
+#### `school_events`
+Check upcoming school calendar events.
 - **Default**: Searches next 3 months
 - **Auto-fallback**: Extends to 12 months if no events found
 - **Parameters**: `searchMonths`, `refresh`
+
+#### `lunch_volunteers`
+Check Lower School lunch volunteer opportunities.
+- **Shows**: Only days with open volunteer slots (filters out fully booked days)
+- **Positions**: Salad/deli and Soup volunteer roles
+- **Times**: All shifts are 10:45am - 11:45am in the dining hall
+- **Source**: SignUpGenius (no Veracross authentication required)
+- **Parameters**: `refresh`, `date` (YYYY-MM-DD), `week` ("this", "next", or date)
+- **Date Filtering**: Can search specific dates or weeks (Sunday-Saturday)
+- **Smart Filtering**: Only displays days that need volunteers (0 or 1 volunteer signed up)
 
 #### `set_default_user`
 Set a default user email to avoid entering it repeatedly.
