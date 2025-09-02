@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import fetch from 'node-fetch';
 import { VeracrossAuth } from './auth.js';
 import { MongoSearchCache } from './mongodb-cache.js';
 
@@ -69,7 +70,8 @@ export class DirectorySearch {
       delete searchParams.userEmail;
       const searchUrl = this.buildSearchUrl(searchParams);
       
-      // Make authenticated request to directory page
+      
+      // Use makeAuthenticatedRequest which now handles cross-domain cookies properly
       const response = await this.auth.makeAuthenticatedRequest(searchUrl);
       
       if (!response.ok) {
@@ -94,41 +96,46 @@ export class DirectorySearch {
   }
 
   private buildSearchUrl(params: DirectorySearchParams): string {
-    const baseUrl = (this.auth as any).baseUrl; // Access private property
-    const searchParams = new URLSearchParams();
-
-    // Add search parameters in Veracross format
-    searchParams.append('directory_entry[first_name]', params.firstName || '');
-    searchParams.append('directory_entry[last_name]', params.lastName || '');
-    searchParams.append('directory_entry[city]', params.city || '');
-    searchParams.append('directory_entry[location]', ''); // Empty location field
-    searchParams.append('directory_entry[postal_code]', params.postalCode || '');
-    searchParams.append('directory_entry[grade_level]', params.gradeLevel || '');
-    searchParams.append('commit', 'Search');
-
-    // Use the actual CSG Veracross directory URL format
-    return `${baseUrl}/parent/directory/1?${searchParams.toString()}`;
+    // Manually build the URL with proper encoding for square brackets
+    const schoolCode = process.env.VERACROSS_SCHOOL_CODE || 'csg';
+    const baseUrl = `https://portals.veracross.com/${schoolCode}/parent/directory/1`;
+    
+    // Build query parameters manually to ensure proper encoding
+    const queryParams: string[] = [];
+    queryParams.push(`directory_entry%5Bfirst_name%5D=${encodeURIComponent(params.firstName || '')}`);
+    queryParams.push(`directory_entry%5Blast_name%5D=${encodeURIComponent(params.lastName || '')}`);
+    queryParams.push(`directory_entry%5Bcity%5D=${encodeURIComponent(params.city || '')}`);
+    queryParams.push(`directory_entry%5Blocation%5D=${encodeURIComponent('')}`);
+    queryParams.push(`directory_entry%5Bpostal_code%5D=${encodeURIComponent(params.postalCode || '')}`);
+    queryParams.push(`directory_entry%5Bgrade_level%5D=${encodeURIComponent(params.gradeLevel || '')}`);
+    queryParams.push(`commit=Search`);
+    
+    return `${baseUrl}?${queryParams.join('&')}`;
   }
 
   private parseDirectoryResults(html: string): DirectoryEntry[] {
     const $ = cheerio.load(html);
     const entries: DirectoryEntry[] = [];
 
-    // Parse CSG Veracross directory entries
+    // Parse CSG Veracross directory entries using the actual HTML structure
+    const directoryEntries = $('.directory-Entry');
+    
     $('.directory-Entry').each((_, element) => {
       const $entry = $(element);
       
       // Get student name and grade
       const studentName = $entry.find('.directory-Entry_Title').first().text().trim();
-      if (!studentName) return;
+      if (!studentName) {
+        return;
+      }
       
       const gradeLevel = $entry.find('.directory-Entry_Tag').first().text().trim();
       
-      // Get student email
+      // Get student email from the header section
       const studentEmailLink = $entry.find('.directory-Entry_Header a[href^="mailto:"]').first();
       const studentEmail = studentEmailLink.length ? studentEmailLink.text().trim() : undefined;
       
-      // Get address from household section
+      // Get address from household section - it's the first FieldTitle without --blue class
       const addressText = $entry.find('.directory-Entry_FieldTitle').first().text().trim();
       const addressParts = this.parseAddress(addressText);
       
@@ -145,7 +152,7 @@ export class DirectorySearch {
       };
       entries.push(studentEntry);
       
-      // Parse parent/guardian entries - updated for new HTML structure
+      // Parse parent/guardian entries - look for blue field titles
       $entry.find('.directory-Entry_FieldTitle--blue').each((_, parentElement) => {
         const $parent = $(parentElement);
         const parentName = $parent.text().trim();
@@ -153,13 +160,14 @@ export class DirectorySearch {
         if (!parentName) return;
         
         // Find parent's contact info - they are in the same grid container as the parent name
-        const $parentContainer = $parent.closest('.ae-grid');
+        const $parentContainer = $parent.closest('.ae-grid__item');
         
-        // Look for mobile phone number
+        // Look for phone number (Mobile field)
         let phone: string | undefined;
         $parentContainer.find('.directory-Entry_FieldLabel').each((_, labelEl) => {
           const $label = $(labelEl);
           if ($label.text().trim() === 'Mobile') {
+            // The value is in the next grid item
             const $valueCell = $label.parent().next('.ae-grid__item--no-padding');
             const phoneLink = $valueCell.find('a[href^="tel:"]');
             if (phoneLink.length) {
@@ -173,6 +181,7 @@ export class DirectorySearch {
         $parentContainer.find('.directory-Entry_FieldLabel').each((_, labelEl) => {
           const $label = $(labelEl);
           if ($label.text().trim() === 'Email') {
+            // The value is in the next grid item
             const $valueCell = $label.parent().next('.ae-grid__item--no-padding');
             const emailLink = $valueCell.find('a[href^="mailto:"]');
             if (emailLink.length) {
