@@ -423,7 +423,6 @@ export class BrowserAuthServer {
 
   private async handleLoginSubmission(req: express.Request, res: express.Response) {
     const { username, password } = req.body;
-    console.error(`Login attempt for user: ${this.userEmail} with username: ${username}`);
     
     if (!username || !password) {
       return res.status(400).json({
@@ -435,31 +434,50 @@ export class BrowserAuthServer {
     try {
       // Create a temporary cookie jar for this login attempt
       const tempCookieJar = new CookieJar();
-      const baseUrl = 'https://portals.veracross.com/csg';
+      const schoolCode = process.env.VERACROSS_SCHOOL_CODE || 'csg';
+      const baseUrl = `https://accounts.veracross.com/${schoolCode}/portals`;
       
-      // Step 1: Get the login page to extract any CSRF tokens or hidden fields
-      const loginPageResponse = await this.makeRequestWithJar(tempCookieJar, `${baseUrl}/login`);
-      const loginPageHtml = await loginPageResponse.text();
+      // Step 1: Get the password page directly with username in URL to extract any CSRF tokens or hidden fields
+      const encodedUsername = encodeURIComponent(username);
+      const passwordPageUrl = `${baseUrl}/login/password?username=${encodedUsername}`;
+      const passwordPageResponse = await this.makeRequestWithJar(tempCookieJar, passwordPageUrl);
+      const passwordPageHtml = await passwordPageResponse.text();
       
       // Extract hidden form fields (CSRF tokens, etc.)
-      const hiddenFields = this.extractHiddenFields(loginPageHtml);
+      const hiddenFields = this.extractHiddenFields(passwordPageHtml);
       
-      // Step 2: Submit login credentials
+      // Step 2: Submit password to the password endpoint
       const loginData = new URLSearchParams({
         username: username,
         password: password,
         ...hiddenFields,
       });
 
-      const loginResponse = await this.makeRequestWithJar(tempCookieJar, `${baseUrl}/login`, {
+      
+      const loginResponse = await this.makeRequestWithJar(tempCookieJar, `${baseUrl}/login/password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Referer': `${baseUrl}/login`,
+          'Referer': passwordPageUrl,
         },
         body: loginData.toString(),
         redirect: 'manual', // Handle redirects manually to check for success
       });
+
+      
+      // Clone the response so we can read the body multiple times
+      const loginResponseClone = loginResponse.clone();
+      const loginResponseText = await loginResponseClone.text();
+      
+      // Check for error messages in response
+      if (loginResponseText.includes('Invalid username or password')) {
+      }
+      if (loginResponseText.includes('recaptcha') || loginResponseText.includes('reCAPTCHA')) {
+      }
+      
+      // Check for success indicators
+      if (loginResponseText.includes('dashboard') || loginResponseText.includes('home') || loginResponseText.includes('portal')) {
+      }
 
       // Step 3: Check if login was successful
       let loginSuccessful = false;
@@ -471,22 +489,30 @@ export class BrowserAuthServer {
         }
       } else if (loginResponse.status === 200) {
         const responseText = await loginResponse.text();
+        
+        // Check if we have session cookies - this is the most reliable indicator
+        const cookies = await tempCookieJar.getCookieString(baseUrl);
+        const hasSessionCookies = cookies.includes('_veracross_session') || cookies.includes('_gatekeeper_session');
+        
         // Check if the response contains error indicators
-        if (!responseText.includes('Invalid') && !responseText.includes('incorrect') && 
-            !responseText.includes('error') && responseText.includes('parent')) {
+        const hasErrors = responseText.includes('Invalid username or password') || 
+                         responseText.includes('incorrect') || 
+                         responseText.includes('login failed');
+        
+        // Success if we have session cookies and no explicit error messages
+        if (hasSessionCookies && !hasErrors) {
           loginSuccessful = true;
         }
+        
       }
 
       if (!loginSuccessful) {
-        console.error(`Login failed for user: ${this.userEmail} - invalid credentials`);
         return res.status(401).json({
           success: false,
           message: 'Invalid username or password'
         });
       }
 
-      console.error(`Login successful for user: ${this.userEmail} - capturing session`);
 
       // Step 4: Get session cookies from the successful login
       const cookieString = await tempCookieJar.getCookieString(baseUrl);
@@ -517,20 +543,16 @@ export class BrowserAuthServer {
         message: 'Login successful and session stored'
       });
 
-      console.error(`Session stored successfully for user: ${this.userEmail}`);
 
       // Resolve the authentication promise if it exists
       if (this.authResolve) {
-        console.error(`Resolving authentication promise for user: ${this.userEmail}`);
         this.authResolve(true);
         
         // Close the server after a short delay to allow the response to be sent
         setTimeout(() => {
-          console.error(`Closing auth server for user: ${this.userEmail}`);
           this.close();
         }, 3000);
       } else {
-        console.error(`Warning: No authentication promise to resolve for user: ${this.userEmail}`);
       }
 
     } catch (error) {
@@ -598,7 +620,6 @@ export class BrowserAuthServer {
       
       // Start the server
       this.server = this.app.listen(port);
-      console.error(`Browser auth server started on http://localhost:${port} for user: ${this.userEmail}`);
 
       // Create a promise that resolves when authentication is complete
       this.authPromise = new Promise((resolve) => {
@@ -608,19 +629,15 @@ export class BrowserAuthServer {
       // Open the browser to our auth page
       const authUrl = `http://localhost:${port}`;
       await open(authUrl);
-      console.error(`Browser opened to ${authUrl} - waiting for user authentication`);
 
       // Wait for authentication to complete (or timeout after 10 minutes for user convenience)
       const timeoutPromise = new Promise<boolean>((resolve) => {
         setTimeout(() => {
-          console.error('Browser authentication timed out after 10 minutes');
           resolve(false);
         }, 10 * 60 * 1000);
       });
 
-      console.error('Waiting for authentication promise to resolve...');
       const result = await Promise.race([this.authPromise, timeoutPromise]);
-      console.error(`Authentication result: ${result ? 'SUCCESS' : 'FAILED/TIMEOUT'}`);
       
       // Ensure server is closed
       this.close();
@@ -651,7 +668,6 @@ export class BrowserAuthServer {
       
       // Check if session is expired
       if (new Date() > new Date(sessionData.expiresAt)) {
-        console.error('Stored session has expired');
         return null;
       }
 

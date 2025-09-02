@@ -42,14 +42,10 @@ export class LunchVolunteerSearch {
     this.signupPageUrl = baseUrl.replace(/#.*$/, '');
     this.apiUrl = 'https://www.signupgenius.com/SUGboxAPI.cfm?go=s.getSignupInfo';
     
-    console.error(`SignUpGenius page URL: ${this.signupPageUrl}`);
-    console.error(`SignUpGenius API URL: ${this.apiUrl}`);
-    console.error(`Extracted URL ID: ${this.urlId}`);
   }
 
   public async searchVolunteerSlots(params: LunchVolunteerParams): Promise<LunchVolunteerSlot[]> {
     try {
-      console.error(`Making direct API call to: ${this.apiUrl}`);
       
       // Make direct POST API request matching the working cURL
       const payload = {
@@ -58,7 +54,6 @@ export class LunchVolunteerSearch {
         portalid: 0
       };
       
-      console.error(`API payload:`, payload);
       
       const apiResponse = await fetch(this.apiUrl, {
         method: 'POST',
@@ -72,29 +67,21 @@ export class LunchVolunteerSearch {
         throw new Error(`API request failed: ${apiResponse.status} ${apiResponse.statusText}`);
       }
 
-      console.error(`API response status: ${apiResponse.status} ${apiResponse.statusText}`);
-      console.error(`API response content-type: ${apiResponse.headers.get('content-type')}`);
-      
       const responseText = await apiResponse.text();
-      console.error(`API response preview (first 500 chars):`, responseText.substring(0, 500));
       
       // Parse the JSON API response
       let slots: LunchVolunteerSlot[] = [];
       
       try {
         const jsonData = JSON.parse(responseText);
-        console.error('Successfully parsed API response as JSON');
-        console.error('JSON structure keys:', Object.keys(jsonData));
         slots = this.parseVolunteerSlotsFromAPI(jsonData);
       } catch (jsonError) {
-        console.error('Failed to parse API response as JSON:', jsonError);
         throw new Error('API response was not valid JSON');
       }
       
       // Apply date/week filtering if specified
       slots = this.filterSlotsByDate(slots, params);
       
-      console.error(`Parsed ${slots.length} volunteer date slots after filtering`);
       
       return slots;
     } catch (error) {
@@ -123,7 +110,6 @@ export class LunchVolunteerSearch {
         const startDateStr = this.formatDateForComparison(weekRange.start);
         const endDateStr = this.formatDateForComparison(weekRange.end);
         
-        console.error(`Comparing slot date ${slotDateStr} against range ${startDateStr} to ${endDateStr}`);
         
         return slotDateStr >= startDateStr && slotDateStr <= endDateStr;
       });
@@ -138,7 +124,6 @@ export class LunchVolunteerSearch {
     // Assume Eastern time - we could make this more sophisticated with timezone libraries
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
-    console.error(`DEBUG: Today is ${today.toDateString()} (day of week: ${today.getDay()})`);
     
     if (week === 'this') {
       // This week: Sunday to Saturday - use local date components to avoid timezone shifts
@@ -146,7 +131,6 @@ export class LunchVolunteerSearch {
       const sunday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek);
       const saturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek + 6);
       
-      console.error(`This week range: ${sunday.toDateString()} (${this.formatDateForComparison(sunday)}) to ${saturday.toDateString()} (${this.formatDateForComparison(saturday)})`);
       return { start: sunday, end: saturday };
     }
     
@@ -156,7 +140,6 @@ export class LunchVolunteerSearch {
       const nextSunday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek + 7);
       const nextSaturday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek + 13);
       
-      console.error(`Next week range: ${nextSunday.toDateString()} (${this.formatDateForComparison(nextSunday)}) to ${nextSaturday.toDateString()} (${this.formatDateForComparison(nextSaturday)})`);
       return { start: nextSunday, end: nextSaturday };
     }
 
@@ -185,23 +168,14 @@ export class LunchVolunteerSearch {
 
   private parseVolunteerSlotsFromAPI(data: any): LunchVolunteerSlot[] {
     const slots: LunchVolunteerSlot[] = [];
-    console.error(`API response structure:`, Object.keys(data));
     
     // The actual SignUpGenius API returns DATA.slots with slot IDs as keys
     if (data.DATA && data.DATA.slots) {
       const slotIds = Object.keys(data.DATA.slots);
-      console.error(`Found ${slotIds.length} slots in API response`);
       
-      // Debug: show all start times to understand the date issue
-      console.error('DEBUG: All slot start times:');
-      slotIds.forEach(id => {
-        const slot = data.DATA.slots[id];
-        console.error(`  Slot ${id}: ${slot.starttime}`);
-      });
       
       slotIds.forEach((slotId) => {
         const slotData = data.DATA.slots[slotId];
-        console.error(`Processing slot ${slotId}:`, Object.keys(slotData));
         
         // Extract date/time information - format like "December, 08 2025 10:45:00"
         const startTime = slotData.starttime;
@@ -215,7 +189,6 @@ export class LunchVolunteerSearch {
         const dayOfWeek = this.getDayOfWeek(date);
         const time = this.formatTimeRange(startTime, endTime);
         
-        console.error(`Slot ${slotId}: startTime="${startTime}" -> date="${date}", dayOfWeek="${dayOfWeek}", time="${time}"`);
         
         const positions: VolunteerPosition[] = [];
         
@@ -258,8 +231,6 @@ export class LunchVolunteerSearch {
         }
       });
     } else {
-      console.error('Unexpected API response structure - no DATA.slots found');
-      console.error('Available keys:', Object.keys(data));
     }
     
     return slots.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -269,13 +240,11 @@ export class LunchVolunteerSearch {
     // Convert "December, 08 2025 10:45:00" to "2025-12-08"
     // Handle timezone issues by parsing manually to avoid Date constructor ambiguity
     try {
-      console.error(`Parsing date string: ${dateTimeStr}`);
       
       // Extract components manually from format like "December, 08 2025 10:45:00" or "August, 26 2025 11:45:00"
       const dateMatch = dateTimeStr.match(/(\w+),\s*(\d{1,2})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
       
       if (!dateMatch) {
-        console.error(`Date string doesn't match expected format: ${dateTimeStr}`);
         return '';
       }
       
@@ -287,7 +256,6 @@ export class LunchVolunteerSearch {
       const monthIndex = monthNames.indexOf(monthName);
       
       if (monthIndex === -1) {
-        console.error(`Unknown month name: ${monthName}`);
         return '';
       }
       
@@ -295,16 +263,13 @@ export class LunchVolunteerSearch {
       const dayStr = day.padStart(2, '0');
       
       const result = `${year}-${month}-${dayStr}`;
-      console.error(`Parsed date result: ${result} (from ${dateTimeStr})`);
       
       // Debug: also check what day of week this should be
       const testDate = new Date(parseInt(year), monthIndex, parseInt(day));
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      console.error(`Expected day of week for ${result}: ${dayNames[testDate.getDay()]}`);
       
       return result;
     } catch (error) {
-      console.error(`Error parsing date ${dateTimeStr}:`, error);
       return '';
     }
   }
@@ -348,7 +313,6 @@ export class LunchVolunteerSearch {
       
       return `${formatTime(start)} - ${formatTime(end)}`;
     } catch (error) {
-      console.error(`Error formatting time range ${startTime} - ${endTime}:`, error);
       return '';
     }
   }
@@ -357,32 +321,23 @@ export class LunchVolunteerSearch {
     const $ = cheerio.load(html);
     const slots: LunchVolunteerSlot[] = [];
 
-    console.error(`HTML length: ${html.length} characters`);
-    console.error(`Looking for date rows with selector: tr[data-ng-repeat*="filteredData"]`);
 
     // Find all date rows - each <tr> with data-ng-repeat="f in filteredData"
     const dateRows = $('tr[data-ng-repeat*="filteredData"]');
-    console.error(`Found ${dateRows.length} date rows`);
 
     // If no date rows found, let's see what other structure we can find
     if (dateRows.length === 0) {
       const allTrs = $('tr');
-      console.error(`Total <tr> elements found: ${allTrs.length}`);
       
       // Look for any elements with date-like content
       const dateElements = $('.signupdata--date-dt');
-      console.error(`Found ${dateElements.length} elements with .signupdata--date-dt class`);
       
       // Look for slot titles
       const slotTitles = $('.signupdata--slot-title');
-      console.error(`Found ${slotTitles.length} elements with .signupdata--slot-title class`);
       
       // Sample first few elements to see structure
       if (allTrs.length > 0) {
         const firstTr = allTrs.first();
-        console.error(`First <tr> attributes:`, firstTr.attr());
-        console.error(`First <tr> classes:`, firstTr.attr('class'));
-        console.error(`First <tr> data attributes:`, Object.keys(firstTr[0].attribs || {}).filter(k => k.startsWith('data')));
       }
     }
 
@@ -395,10 +350,7 @@ export class LunchVolunteerSearch {
       const timeText = $dateRow.find('.signupdata--date-time').text().trim();
       const location = $dateRow.find('.signupdata--loc-name, p').filter((_, el) => $(el).text().trim() === 'Dining hall').text().trim() || 'Dining hall';
       
-      console.error(`Processing date row: dateText="${dateText}", dayOfWeek="${dayOfWeek}", timeText="${timeText}"`);
-      
       if (!dateText) {
-        console.error('No date text found, skipping row');
         return; // Skip if no date found
       }
       
@@ -412,7 +364,6 @@ export class LunchVolunteerSearch {
       const positions: VolunteerPosition[] = [];
       
       const positionRows = $dateRow.find('tr[data-ng-repeat*="f.items"]');
-      console.error(`Found ${positionRows.length} position rows for date ${dateText}`);
       
       positionRows.each((_, positionRow) => {
         const $positionRow = $(positionRow);
@@ -496,7 +447,6 @@ export class LunchVolunteerSearch {
       
       return dateString;
     } catch (error) {
-      console.error('Date conversion failed:', error);
       return dateString;
     }
   }
