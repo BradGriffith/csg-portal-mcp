@@ -1,0 +1,138 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "CSG Portal MCP API",
+    "description": "MCP Server for Columbus School for Girls Veracross portal integration",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/.netlify/functions",
+      "description": "Netlify Functions endpoint"
+    }
+  ],
+  "paths": {
+    "/mcp-api": {
+      "get": {
+        "summary": "Get available tools",
+        "description": "Returns a list of available MCP tools",
+        "responses": {
+          "200": {
+            "description": "List of available tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Execute MCP tool",
+        "description": "Executes a specific MCP tool with provided parameters",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MCPRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tool execution result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ToolsList": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Tool"
+            }
+          }
+        }
+      },
+      "Tool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object"
+          }
+        }
+      },
+      "MCPRequest": {
+        "type": "object",
+        "required": ["method"],
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "login",
+              "set_default_user",
+              "check_authentication",
+              "search_directory",
+              "school_events",
+              "lunch_volunteers",
+              "logout",
+              "clear_credentials"
+            ]
+          },
+          "params": {
+            "type": "object",
+            "description": "Tool-specific parameters"
+          }
+        }
+      },
+      "MCPResponse": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "object",
+            "description": "Tool execution result"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
