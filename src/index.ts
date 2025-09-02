@@ -47,8 +47,9 @@ class CSGPortalMCPServer {
     );
 
     // Initialize with base URL from environment or default
-    const baseUrl = process.env.VERACROSS_BASE_URL || 'https://portals.veracross.com/csg';
-    this.auth = new VeracrossAuth(baseUrl);
+    const schoolCode = process.env.VERACROSS_SCHOOL_CODE || 'csg';
+    const authBaseUrl = `https://accounts.veracross.com/${schoolCode}/portals`;
+    this.auth = new VeracrossAuth(authBaseUrl);
     this.directorySearch = new DirectorySearch(this.auth);
     this.calendarSearch = new CalendarSearch(this.auth);
     this.lunchVolunteerSearch = new LunchVolunteerSearch();
