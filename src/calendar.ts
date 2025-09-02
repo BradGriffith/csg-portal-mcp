@@ -47,11 +47,11 @@ export class CalendarSearch {
   }
 
   private buildCalendarUrl(beginDate: Date, endDate: Date): string {
-    const baseUrl = (this.auth as any).baseUrl; // Access private property
+    const schoolCode = process.env.VERACROSS_SCHOOL_CODE || 'csg';
     const beginDateStr = this.formatDateForUrl(beginDate);
     const endDateStr = this.formatDateForUrl(endDate);
     
-    return `${baseUrl}/parent/calendar/household/events?begin_date=${beginDateStr}&end_date=${endDateStr}`;
+    return `https://portals.veracross.com/${schoolCode}/parent/calendar/household/events?begin_date=${beginDateStr}&end_date=${endDateStr}`;
   }
 
   public async searchUpcomingEvents(params: CalendarSearchParams): Promise<CalendarEvent[]> {
